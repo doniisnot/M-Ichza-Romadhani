@@ -1,0 +1,589 @@
+openapi: 3.0.3
+info:
+  title: AI Credit Scoring Engine API
+  description: >
+    REST API untuk Sistem Informasi Koperasi Simpan Pinjam berbasis AI.
+    Laravel berperan sebagai System of Record & Business Authority,
+    sedangkan Python FastAPI berperan sebagai ML Service / Inference Engine
+    menggunakan Decision Tree algoritma ID3.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local Development Server
+  - url: https://api.koperasi-ai.id/api/v1
+    description: Production Server
+
+tags:
+  - name: Authentication
+  - name: Members
+  - name: Loan Applications
+  - name: AI
+  - name: Analyst Decisions
+  - name: Audit Logs
+  - name: Reports
+
+security:
+  - BearerAuth: []
+
+paths:
+  /users/login:
+    post:
+      summary: Autentikasi pengguna
+      operationId: loginUser
+      tags: [Authentication]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Format request tidak sesuai
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Email atau password salah
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /members:
+    get:
+      summary: Mendapatkan daftar anggota
+      operationId: getMembers
+      tags: [Members]
+      responses:
+        '200':
+          description: Daftar anggota berhasil diambil
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MemberResponse'
+        '401':
+          description: Token tidak valid atau kedaluwarsa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Akses ditolak
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Pendaftaran anggota baru
+      operationId: createMember
+      tags: [Members]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMemberRequest'
+      responses:
+        '201':
+          description: Anggota berhasil didaftarkan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberResponse'
+        '400':
+          description: Data anggota sudah ada atau format salah
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validasi gagal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loans:
+    post:
+      summary: Pengajuan pinjaman baru
+      description: Pengajuan baru selalu dimulai dengan status Pending Review.
+      operationId: createLoan
+      tags: [Loan Applications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLoanRequest'
+      responses:
+        '201':
+          description: Pengajuan berhasil dibuat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanResponse'
+        '401':
+          description: Tidak terautentikasi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Nominal pinjaman tidak valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      summary: Mendapatkan daftar pengajuan pinjaman
+      operationId: getLoans
+      tags: [Loan Applications]
+      responses:
+        '200':
+          description: Daftar pengajuan berhasil diambil
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LoanResponse'
+        '401':
+          description: Tidak terautentikasi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Akses ditolak
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loans/my-applications:
+    get:
+      summary: Tracking pengajuan milik anggota
+      operationId: getMyLoans
+      tags: [Loan Applications]
+      responses:
+        '200':
+          description: Riwayat pengajuan milik pengguna
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LoanResponse'
+        '401':
+          description: Token tidak valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Pengguna bukan anggota
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loans/{id}/attributes:
+    post:
+      summary: Menyimpan atribut input AI
+      description: Menyimpan empat atribut wajib job, education, housing, dan loan.
+      operationId: saveScoringAttributes
+      tags: [AI]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoringPredictRequest'
+      responses:
+        '200':
+          description: Atribut AI berhasil disimpan
+        '404':
+          description: Pengajuan tidak ditemukan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Atribut tidak lengkap atau tidak valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /scoring/predict:
+    post:
+      summary: Eksekusi AI Credit Scoring Engine
+      description: >
+        [AI] Memproses empat atribut wajib menggunakan Decision Tree ID3.
+        AI hanya menghasilkan recommendation dan tidak mengubah status resmi
+        pengajuan. Timeout lebih dari 5 detik atau error service diperlakukan
+        sebagai fallback; status pinjaman tetap Pending Review.
+      operationId: predictCreditScore
+      tags: [AI]
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoringPredictRequest'
+      responses:
+        '200':
+          description: Scoring AI berhasil diproses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringPredictResponse'
+        '422':
+          description: Atribut input kurang atau enum invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: ML Service mengalami kesalahan internal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: ML Engine timeout lebih dari 5000 ms
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loans/{id}/decision:
+    post:
+      summary: Konfirmasi keputusan analis
+      description: >
+        Hanya Credit Analyst yang mengubah status resmi pengajuan.
+        approved menjadi Diterima dan rejected menjadi Ditolak.
+      operationId: saveAnalystDecision
+      tags: [Analyst Decisions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalystDecisionRequest'
+      responses:
+        '200':
+          description: Keputusan final berhasil disimpan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanResponse'
+        '403':
+          description: Bukan Credit Analyst
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Pengajuan tidak ditemukan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /audit-logs:
+    get:
+      summary: Mendapatkan audit trail
+      operationId: getAuditLogs
+      tags: [Audit Logs]
+      responses:
+        '200':
+          description: Audit log berhasil diambil
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLogResponse'
+        '401':
+          description: Tidak terautentikasi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Akses khusus Auditor atau Admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /reports:
+    get:
+      summary: Mendapatkan laporan
+      operationId: getReports
+      tags: [Reports]
+      responses:
+        '200':
+          description: Laporan berhasil diambil
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: Tidak terautentikasi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Akses laporan ditolak
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    LoginResponse:
+      type: object
+      required: [token, role]
+      properties:
+        token:
+          type: string
+        role:
+          $ref: '#/components/schemas/UserRole'
+
+    CreateMemberRequest:
+      type: object
+      required: [full_name, member_number]
+      additionalProperties: false
+      properties:
+        full_name:
+          type: string
+          minLength: 1
+        member_number:
+          type: string
+          minLength: 1
+
+    MemberResponse:
+      type: object
+      required: [id, member_number, full_name]
+      properties:
+        id:
+          type: integer
+          format: int64
+        member_number:
+          type: string
+        full_name:
+          type: string
+
+    CreateLoanRequest:
+      type: object
+      required: [amount]
+      additionalProperties: false
+      properties:
+        amount:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+
+    LoanResponse:
+      type: object
+      required: [id, member_id, amount, status, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        member_id:
+          type: integer
+          format: int64
+        amount:
+          type: number
+          format: double
+        status:
+          $ref: '#/components/schemas/LoanStatus'
+        created_at:
+          type: string
+          format: date-time
+
+    ScoringPredictRequest:
+      type: object
+      required: [job, education, housing, loan]
+      additionalProperties: false
+      properties:
+        job:
+          type: string
+          minLength: 1
+        education:
+          type: string
+          minLength: 1
+        housing:
+          $ref: '#/components/schemas/YesNo'
+        loan:
+          $ref: '#/components/schemas/YesNo'
+
+    ScoringModelInfo:
+      type: object
+      required: [name, algorithm, version]
+      properties:
+        name:
+          type: string
+          example: Decision Tree
+        algorithm:
+          type: string
+          example: ID3
+        version:
+          type: string
+          example: 1.0.0
+
+    ScoringPredictResponse:
+      type: object
+      required:
+        - success
+        - prediction
+        - recommendation
+        - processing_time_ms
+        - model
+      properties:
+        success:
+          type: boolean
+        prediction:
+          $ref: '#/components/schemas/Prediction'
+        recommendation:
+          $ref: '#/components/schemas/Recommendation'
+        processing_time_ms:
+          type: integer
+          minimum: 0
+        model:
+          $ref: '#/components/schemas/ScoringModelInfo'
+        fallback:
+          type: boolean
+          default: false
+        fallback_reason:
+          type: string
+          nullable: true
+        loan_status_unchanged:
+          type: boolean
+          default: true
+
+    AnalystDecisionRequest:
+      type: object
+      required: [decision]
+      additionalProperties: false
+      properties:
+        decision:
+          $ref: '#/components/schemas/AnalystDecision'
+        notes:
+          type: string
+          nullable: true
+
+    AuditLogResponse:
+      type: object
+      required: [id, action, details, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        action:
+          type: string
+        details:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+
+    UserRole:
+      type: string
+      enum: [member, credit_analyst, admin, auditor]
+
+    LoanStatus:
+      type: string
+      enum: [Pending Review, Diterima, Ditolak]
+
+    YesNo:
+      type: string
+      enum: [yes, no]
+
+    Prediction:
+      type: string
+      enum: [Yes, No]
+
+    Recommendation:
+      type: string
+      enum: [Diterima, Ditolak]
+
+    AnalystDecision:
+      type: string
+      enum: [approved, rejected]
